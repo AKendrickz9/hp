@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Strike Zone Overlay (Calibrated Width)</title>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 200px;
+      width: 1000px;
+      background: transparent;
+      overflow: hidden;
+    }
+    
+    #pitch-speed {
+      position: fixed;       /* stick to viewport */
+      top: 0px;             /* 10px from top */
+      left: 10px;            /* 10px from left */
+      opacity: 0;
+      font-family: sans-serif;
+      font-size: 40px;
+      font-weight: bold;
+      color: white;
+      text-shadow: 2px 2px 5px rgba(0, 0, 0, 0.9);
+      white-space: nowrap;
+      pointer-events: none;
+      background: none;
+      transform: none;
+      transition: opacity 0.3s ease;
+    }
+  </style>
+</head>
+<body>
+  
+  <div id="pitch-speed"></div>
+
+  <script>
+    // --- Firebase init ---
+    firebase.initializeApp({
+      apiKey: "AIzaSyAptY-0CVT7NMYYXKrPemAwoDshwHE7SlE",
+      authDomain: "high-point-b1fe4.firebaseapp.com",
+      databaseURL: "https://high-point-b1fe4-default-rtdb.firebaseio.com",
+      projectId: "high-point-b1fe4",
+      storageBucket: "high-point-b1fe4.appspot.com",
+      messagingSenderId: "250070076976",
+      appId: "1:250070076976:web:553c6f8a0bbf56b7c5a7f5",
+      measurementId: "G-85YP45XJMV"
+    });
+    const db      = firebase.database();
+    const speedEl = document.getElementById('pitch-speed');
+
+
+
+
+    // real zone dimensions (feet)
+    const zoneWidthFt = 17 / 12;           // 17" wide
+    const halfZone    = zoneWidthFt / 2;
+    const zMinFt      = 21.08 / 12;        // bottom of zone
+    const zMaxFt      = 40.53 / 12;        // top of zone
+    const zoneHft     = zMaxFt - zMinFt;
+
+    function mapToPixels(xFt, zFt) {
+      // xFt: -halfZone → +halfZone
+      // zFt: zMinFt → zMaxFt
+      const pctX = (xFt + halfZone) / zoneWidthFt;
+      const pctY = (zMaxFt - zFt) / zoneHft;
+      return {
+        x: pctX * Wpx,
+        y: pctY * Hpx
+      };
+    }
+
+    // listen for new pings
+    db.ref('trackman/pitches').on('child_added', snap => {
+      const ref = snap.ref;
+      const handler = fullSnap => {
+        const d = fullSnap.val();
+        if (
+          d.Kind === 'Pitch' &&
+          typeof d.Pitch.Speed === 'number'
+        ) {
+          // map to pixels
+          
+          // show the speed (fixed by CSS)
+          speedEl.textContent   = Math.round(d.Pitch.Speed);
+          speedEl.style.opacity = 1;
+
+          // stop listening for updates on this pitch
+          ref.off('value', handler);
+        }
+      };
+      ref.on('value', handler);
+    });
+  </script>
+</body>
+</html>
