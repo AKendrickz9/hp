@@ -24,7 +24,8 @@
             width: 100%;
             max-width: 28rem;
         }
-        input[type="number"] {
+        input[type="number"],
+        select { /* Combined style for number input and select */
             background-color: #4a5568;
             color: #e2e8f0;
             border: 1px solid #6b7280;
@@ -32,6 +33,13 @@
             padding: 0.75rem 1rem;
             width: 100%;
             box-sizing: border-box;
+            appearance: none; /* Remove default arrow on select */
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%23a0aec0'%3E%3Cpath fill-rule='evenodd' d='M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z' clip-rule='evenodd'/%3E%3C/svg%3E"); /* Custom arrow */
+            background-repeat: no-repeat;
+            background-position: right 0.75rem center;
+            background-size: 1.5em;
         }
         button {
             background-color: #4299e1;
@@ -75,6 +83,16 @@
 
         <button id="transferButton">Transfer Pitches</button>
 
+        <hr class="my-6 border-gray-600">
+        <h2 class="text-xl font-bold mb-4 text-center">Spray Name Management</h2>
+        <div class="mb-4">
+            <label for="sprayNameSelect" class="block text-sm font-medium text-gray-300 mb-2">Select Name for Spray Data:</label>
+            <select id="sprayNameSelect" class="focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="">Loading batters...</option>
+            </select>
+        </div>
+        <button id="saveSelectedSprayNameButton" class="mt-2">Save Selected Name to Firebase</button>
+        
         <div id="statusMessage" class="hidden"></div>
     </div>
 
@@ -99,6 +117,8 @@
 
         const numPitchesInput = document.getElementById('numPitches');
         const transferButton = document.getElementById('transferButton');
+        const sprayNameSelect = document.getElementById('sprayNameSelect'); // Updated to select element
+        const saveSelectedSprayNameButton = document.getElementById('saveSelectedSprayNameButton'); // New button
         const statusMessage = document.getElementById('statusMessage');
 
         function showStatus(message, type) {
@@ -106,6 +126,60 @@
             statusMessage.className = `block ${type === 'info' ? 'status-info' : ''} ${type === 'success' ? 'status-success' : ''} ${type === 'error' ? 'status-error' : ''}`;
             statusMessage.classList.remove('hidden');
         }
+
+        // Function to save the selected spray name to Firebase
+        async function saveSprayNameToFirebase(name) {
+            if (!name) {
+                showStatus('No batter name selected.', 'info');
+                return;
+            }
+
+            showStatus(`Saving "${name}" to Firebase...`, 'info');
+            // Disable button if it was clicked, or prevent multiple rapid triggers
+
+            try {
+                const sprayRef = database.ref('trackman/spray');
+                await sprayRef.set(name); // Writes the selected name directly
+                showStatus(`Successfully saved "${name}" to 'trackman/spray'.`, 'success');
+                console.log(`DEBUG: Successfully saved spray name: ${name}`);
+            } catch (error) {
+                console.error("DEBUG: Error saving spray name:", error);
+                showStatus(`Error saving spray name: ${error.message}`, 'error');
+            } finally {
+                // Re-enable button if applicable
+            }
+        }
+
+        // Function to fetch batters and populate the dropdown
+        async function fetchBattersAndPopulateDropdown() {
+            showStatus('Loading batters...', 'info');
+            try {
+                const battersRef = database.ref('batters');
+                const snapshot = await battersRef.once('value');
+                const batters = snapshot.val();
+
+                // Clear existing options
+                sprayNameSelect.innerHTML = '<option value="">-- Select a Batter --</option>';
+
+                if (batters && Array.isArray(batters)) {
+                    batters.sort().forEach(batterName => { // Sort for alphabetical order
+                        const option = document.createElement('option');
+                        option.value = batterName;
+                        option.textContent = batterName;
+                        sprayNameSelect.appendChild(option);
+                    });
+                    showStatus('Batters loaded successfully.', 'success');
+                } else {
+                    showStatus('No batters found in Firebase at "batters" reference or data is not an array.', 'error');
+                    console.warn('DEBUG: Expected "batters" to be an array, got:', batters);
+                }
+            } catch (error) {
+                console.error("DEBUG: Error fetching batters:", error);
+                showStatus(`Error loading batters: ${error.message}`, 'error');
+            }
+        }
+
+        // --- Event Listeners ---
 
         transferButton.addEventListener('click', async () => {
             const numPitches = parseInt(numPitchesInput.value, 10);
@@ -125,7 +199,7 @@
                 showStatus('Existing data cleared. Fetching pitches...', 'info');
 
                 const pitchesRef = database.ref('trackman/pitches');
-                const fetchLimit = numPitches * 5;
+                const fetchLimit = numPitches * 5; // Fetch more to ensure enough "Pitch" type
                 const snapshot = await pitchesRef.orderByKey().limitToLast(fetchLimit).once('value');
                 
                 const allFetchedPitches = [];
@@ -134,10 +208,11 @@
                 });
 
                 const pitchesToTransfer = [];
+                // Iterate backwards to get the most recent valid pitches
                 for (let i = allFetchedPitches.length - 1; i >= 0 && pitchesToTransfer.length < numPitches; i--) {
                     const pitchData = allFetchedPitches[i];
                     if (pitchData && pitchData.Kind === "Pitch") {
-                        pitchesToTransfer.unshift(pitchData);
+                        pitchesToTransfer.unshift(pitchData); // Add to the beginning to maintain order
                     }
                 }
 
@@ -165,6 +240,32 @@
             } finally {
                 transferButton.disabled = false;
             }
+        });
+
+        // Event listener for selecting a spray name (fires only when selection changes)
+        sprayNameSelect.addEventListener('change', async () => {
+            const selectedSprayName = sprayNameSelect.value;
+            if (selectedSprayName) { // Only save if a valid batter is selected
+                await saveSprayNameToFirebase(selectedSprayName);
+            } else {
+                showStatus('Please select a batter name.', 'info');
+            }
+        });
+
+        // New: Event listener for the explicit "Save Selected Name" button
+        saveSelectedSprayNameButton.addEventListener('click', async () => {
+            const currentSelectedName = sprayNameSelect.value;
+            if (currentSelectedName) {
+                await saveSprayNameToFirebase(currentSelectedName);
+            } else {
+                showStatus('No batter name selected in the dropdown.', 'error');
+            }
+        });
+
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchBattersAndPopulateDropdown();
         });
     </script>
 </body>
