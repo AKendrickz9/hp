@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pitch Data Controller</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a202c;
+            color: #e2e8f0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 1rem;
+        }
+        .container {
+            background-color: #2d3748;
+            padding: 2rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 28rem;
+        }
+        input[type="number"] {
+            background-color: #4a5568;
+            color: #e2e8f0;
+            border: 1px solid #6b7280;
+            border-radius: 0.5rem;
+            padding: 0.75rem 1rem;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #4299e1;
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            font-weight: bold;
+            transition: background-color 0.2s;
+            cursor: pointer;
+            width: 100%;
+        }
+        button:hover {
+            background-color: #3182ce;
+        }
+        #statusMessage {
+            margin-top: 1rem;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            font-size: 0.875rem;
+            word-wrap: break-word;
+        }
+        .status-info {
+            background-color: #2b6cb0;
+        }
+        .status-success {
+            background-color: #38a169;
+        }
+        .status-error {
+            background-color: #e53e3e;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-2xl font-bold mb-6 text-center">Pitch Data Transfer</h1>
+
+        <div class="mb-4">
+            <label for="numPitches" class="block text-sm font-medium text-gray-300 mb-2">Number of Pitches to Transfer (X):</label>
+            <input type="number" id="numPitches" min="1" value="10" class="focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+
+        <button id="transferButton">Transfer Pitches</button>
+
+        <div id="statusMessage" class="hidden"></div>
+    </div>
+
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyAptY-0CVT7NMYYXKrPemAwoDshwHE7SlE",
+            authDomain: "high-point-b1fe4.firebaseapp.com",
+            databaseURL: "https://high-point-b1fe4-default-rtdb.firebaseio.com",
+            projectId: "high-point-b1fe4",
+            storageBucket: "high-point-b1fe4.appspot.com",
+            messagingSenderId: "250070076976",
+            appId: "1:250070076976:web:553c6f8a0bbf56b7c5a7f5",
+            measurementId: "G-85YP45XJMV"
+        };
+
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        const database = firebase.database();
+
+        const numPitchesInput = document.getElementById('numPitches');
+        const transferButton = document.getElementById('transferButton');
+        const statusMessage = document.getElementById('statusMessage');
+
+        function showStatus(message, type) {
+            statusMessage.textContent = message;
+            statusMessage.className = `block ${type === 'info' ? 'status-info' : ''} ${type === 'success' ? 'status-success' : ''} ${type === 'error' ? 'status-error' : ''}`;
+            statusMessage.classList.remove('hidden');
+        }
+
+        transferButton.addEventListener('click', async () => {
+            const numPitches = parseInt(numPitchesInput.value, 10);
+
+            if (isNaN(numPitches) || numPitches <= 0) {
+                showStatus('Please enter a valid positive number for pitches.', 'error');
+                return;
+            }
+
+            showStatus(`Processing: Fetching last ${numPitches} pitches and preparing transfer...`, 'info');
+            transferButton.disabled = true;
+
+            try {
+                const animationRef = database.ref('trackman/animation');
+                await animationRef.set(null);
+                console.log("DEBUG: Cleared existing data in 'trackman/animation'.");
+                showStatus('Existing data cleared. Fetching pitches...', 'info');
+
+                const pitchesRef = database.ref('trackman/pitches');
+                const fetchLimit = numPitches * 5;
+                const snapshot = await pitchesRef.orderByKey().limitToLast(fetchLimit).once('value');
+                
+                const allFetchedPitches = [];
+                snapshot.forEach(childSnapshot => {
+                    allFetchedPitches.push(childSnapshot.val());
+                });
+
+                const pitchesToTransfer = [];
+                for (let i = allFetchedPitches.length - 1; i >= 0 && pitchesToTransfer.length < numPitches; i--) {
+                    const pitchData = allFetchedPitches[i];
+                    if (pitchData && pitchData.Kind === "Pitch") {
+                        pitchesToTransfer.unshift(pitchData);
+                    }
+                }
+
+                if (pitchesToTransfer.length === 0) {
+                    showStatus('No valid pitches found to transfer within the fetched range.', 'success');
+                    console.log("DEBUG: No valid pitches found to transfer.");
+                    return;
+                }
+
+                showStatus(`Found ${pitchesToTransfer.length} valid pitches. Transferring...`, 'info');
+                console.log(`DEBUG: Found ${pitchesToTransfer.length} valid pitches to transfer.`);
+
+                const promises = pitchesToTransfer.map(pitch => {
+                    return animationRef.push(pitch);
+                });
+
+                await Promise.all(promises);
+
+                showStatus(`Successfully transferred ${pitchesToTransfer.length} pitches to 'trackman/animation'.`, 'success');
+                console.log(`DEBUG: Successfully transferred ${pitchesToTransfer.length} pitches.`);
+
+            } catch (error) {
+                console.error("DEBUG: Error during pitch transfer:", error);
+                showStatus(`Error transferring pitches: ${error.message}`, 'error');
+            } finally {
+                transferButton.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>
